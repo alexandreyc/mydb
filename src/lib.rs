@@ -1,6 +1,8 @@
 #[derive(Debug)]
 enum Error {
     DecodeError(String),
+    KeyTooLong,
+    ValueTooLong,
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -45,15 +47,97 @@ impl Encodable for Header {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct KeyValue {
+    timestamp: u32,
+    key: String,
+    value: String,
+}
+
+impl KeyValue {
+    fn new(timestamp: u32, key: String, value: String) -> Result<Self> {
+        if key.len() > u32::MAX as usize {
+            return Err(Error::KeyTooLong);
+        }
+        if value.len() > u32::MAX as usize {
+            return Err(Error::ValueTooLong);
+        }
+        Ok(KeyValue {
+            timestamp,
+            key,
+            value,
+        })
+    }
+}
+
+impl Encodable for KeyValue {
+    fn encode(&self) -> Vec<u8> {
+        let header = Header {
+            timestamp: self.timestamp,
+            key_size: u32::try_from(self.key.len()).unwrap(), // cannot overflow u32 if we use `KeyValue::new`
+            value_size: u32::try_from(self.value.len()).unwrap(), // idem
+        };
+        let mut buf = header.encode();
+        buf.extend_from_slice(self.key.as_bytes());
+        buf.extend_from_slice(self.value.as_bytes());
+        buf
+    }
+
+    fn decode(buf: &[u8]) -> Result<Self> {
+        if buf.len() < HEADER_SIZE {
+            return Err(Error::DecodeError(
+                "not enough data to decode header".to_string(),
+            ));
+        }
+
+        let header = Header::decode(&buf[..HEADER_SIZE])?;
+        let offset_key = HEADER_SIZE;
+        let offset_value = offset_key + (header.key_size as usize);
+
+        let key = &buf[offset_key..offset_value];
+        let key = match std::str::from_utf8(key) {
+            Ok(key) => key.to_owned(),
+            Err(err) => return Err(Error::DecodeError(format!("error decoding key: {}", err))),
+        };
+
+        let value = &buf[offset_value..];
+        if value.len() != header.value_size as usize {
+            return Err(Error::DecodeError(format!(
+                "wrong value size: got {} bytes, expected {} bytes",
+                value.len(),
+                header.value_size
+            )));
+        }
+
+        let value = match std::str::from_utf8(value) {
+            Ok(value) => value.to_owned(),
+            Err(err) => return Err(Error::DecodeError(format!("error decoding value: {}", err))),
+        };
+
+        Ok(KeyValue {
+            timestamp: header.timestamp,
+            key,
+            value,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::distributions::{Alphanumeric, DistString};
     use rand::random;
 
     fn assert_header_encode(header: Header) {
         let encoded = header.encode();
         let decoded = Header::decode(&encoded).unwrap();
         assert_eq!(header, decoded);
+    }
+
+    fn assert_keyvalue_encode(kv: KeyValue) {
+        let encoded = kv.encode();
+        let decoded = KeyValue::decode(&encoded).unwrap();
+        assert_eq!(kv, decoded);
     }
 
     #[test]
@@ -90,6 +174,32 @@ mod tests {
                 value_size: random(),
             };
             assert_header_encode(header);
+        }
+    }
+
+    #[test]
+    fn test_keyvalue() {
+        let kvs = [
+            KeyValue::new(10, "hello".to_string(), "world".to_string()).unwrap(),
+            KeyValue::new(0, "".to_string(), "".to_string()).unwrap(),
+        ];
+
+        for kv in kvs {
+            assert_keyvalue_encode(kv);
+        }
+    }
+
+    #[test]
+    fn test_keyvalue_random() {
+        for _ in 0..100 {
+            let key_chars = random::<usize>() % (1 << 10);
+            let value_chars = random::<usize>() % (1 << 10);
+
+            let key = Alphanumeric.sample_string(&mut rand::thread_rng(), key_chars);
+            let value = Alphanumeric.sample_string(&mut rand::thread_rng(), value_chars);
+
+            let kv = KeyValue::new(random(), key, value).unwrap();
+            assert_keyvalue_encode(kv);
         }
     }
 }
