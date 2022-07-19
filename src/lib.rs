@@ -5,6 +5,12 @@ enum Error {
     ValueTooLong,
 }
 
+impl From<std::str::Utf8Error> for Error {
+    fn from(err: std::str::Utf8Error) -> Self {
+        Self::DecodeError(format!("unable to decode utf-8: {}", err))
+    }
+}
+
 type Result<T> = std::result::Result<T, Error>;
 
 trait Encodable: Sized {
@@ -33,7 +39,7 @@ impl Encodable for Header {
     fn decode(buf: &[u8]) -> Result<Self> {
         if buf.len() != HEADER_SIZE {
             return Err(Error::DecodeError(format!(
-                "wrong header size: got {} bytes, expected {} bytes",
+                "wrong header buffer size: got {} bytes, expected {} bytes",
                 buf.len(),
                 HEADER_SIZE
             )));
@@ -90,32 +96,34 @@ impl Encodable for KeyValue {
             ));
         }
 
-        let header = Header::decode(&buf[..HEADER_SIZE])?;
-        let offset_key = HEADER_SIZE;
-        let offset_value = offset_key + (header.key_size as usize);
+        let Header {
+            timestamp,
+            key_size,
+            value_size,
+        } = Header::decode(&buf[..HEADER_SIZE])?;
+        let key_size = key_size as usize;
+        let value_size = value_size as usize;
+        let total_size = HEADER_SIZE + key_size + value_size;
 
-        let key = &buf[offset_key..offset_value];
-        let key = match std::str::from_utf8(key) {
-            Ok(key) => key.to_owned(),
-            Err(err) => return Err(Error::DecodeError(format!("error decoding key: {}", err))),
-        };
-
-        let value = &buf[offset_value..];
-        if value.len() != header.value_size as usize {
+        if buf.len() != total_size {
             return Err(Error::DecodeError(format!(
-                "wrong value size: got {} bytes, expected {} bytes",
-                value.len(),
-                header.value_size
+                "wrong key-value buffer size: got {} bytes, expected {} bytes",
+                buf.len(),
+                total_size
             )));
         }
 
-        let value = match std::str::from_utf8(value) {
-            Ok(value) => value.to_owned(),
-            Err(err) => return Err(Error::DecodeError(format!("error decoding value: {}", err))),
-        };
+        let offset_key = HEADER_SIZE;
+        let offset_value = offset_key + key_size;
+
+        let key = &buf[offset_key..offset_value];
+        let key = std::str::from_utf8(key)?.to_owned();
+
+        let value = &buf[offset_value..offset_value + value_size];
+        let value = std::str::from_utf8(value)?.to_owned();
 
         Ok(KeyValue {
-            timestamp: header.timestamp,
+            timestamp,
             key,
             value,
         })
