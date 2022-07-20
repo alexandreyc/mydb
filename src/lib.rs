@@ -199,6 +199,7 @@ impl KeyDir {
 pub struct MyDB {
     file: fs::File,
     keydir: KeyDir,
+    offset: usize,
 }
 
 impl MyDB {
@@ -209,12 +210,20 @@ impl MyDB {
             .create(true)
             .open(path)?;
         let keydir = KeyDir::load(&file)?;
-        Ok(MyDB { file, keydir })
+        Ok(MyDB {
+            file,
+            keydir,
+            offset: 0,
+        })
     }
 
     pub fn new_from_file(file: fs::File) -> Result<Self> {
         let keydir = KeyDir::load(&file)?;
-        Ok(MyDB { file, keydir })
+        Ok(MyDB {
+            file,
+            keydir,
+            offset: 0,
+        })
     }
 
     pub fn get(&mut self, key: &str) -> Result<Option<String>> {
@@ -242,18 +251,17 @@ impl MyDB {
         self.file.flush()?;
         self.file.sync_all()?;
 
-        // TODO: instead of computing offset by seeking, we should maintain some state
         // TODO: we should first update keydir before writing to file: we can undo keydir update in case
         // file writing has an error.
 
         let size = kv.len() as u64;
-        let offset = tell(&mut self.file)? - size;
         let entry = KeyDirEntry {
             timestamp,
             size: size.try_into().unwrap(),
-            offset: offset.try_into().unwrap(),
+            offset: self.offset,
         };
         self.keydir.0.insert(key.to_owned(), entry);
+        self.offset += size as usize;
 
         Ok(())
     }
