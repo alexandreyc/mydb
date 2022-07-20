@@ -168,7 +168,6 @@ impl KeyDir {
                 }
                 return Err(Error::IoError(err));
             }
-            offset += HEADER_SIZE;
 
             let Header {
                 timestamp,
@@ -180,17 +179,17 @@ impl KeyDir {
 
             buf.resize(std::cmp::max(key_size, buf.len()), 0);
             reader.read_exact(&mut buf[..key_size])?;
-            offset += key_size;
             let key = std::str::from_utf8(&buf[..key_size])?.to_owned();
 
             reader.seek(io::SeekFrom::Current(value_size as i64))?;
-            offset += value_size;
 
             let entry = KeyDirEntry {
                 timestamp,
                 size: (HEADER_SIZE + key_size + value_size).try_into().unwrap(),
                 offset,
             };
+
+            offset += HEADER_SIZE + key_size + value_size;
 
             keydir.insert(key, entry);
         }
