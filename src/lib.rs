@@ -1,6 +1,16 @@
+use std::collections::HashMap;
+use std::fs;
+use std::io;
+use std::io::Read;
+use std::io::Seek;
+use std::io::Write;
+use std::path::Path;
+use std::time;
+
 #[derive(Debug)]
-enum Error {
+pub enum Error {
     DecodeError(String),
+    IoError(io::Error),
     KeyTooLong,
     ValueTooLong,
 }
@@ -11,7 +21,13 @@ impl From<std::str::Utf8Error> for Error {
     }
 }
 
-type Result<T> = std::result::Result<T, Error>;
+impl From<io::Error> for Error {
+    fn from(err: io::Error) -> Self {
+        Self::IoError(err)
+    }
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 trait Encodable: Sized {
     fn encode(&self) -> Vec<u8>;
@@ -128,6 +144,130 @@ impl Encodable for KeyValue {
             value,
         })
     }
+}
+
+struct KeyDirEntry {
+    timestamp: u32,
+    size: u32,     // total size of the record (in bytes)
+    offset: usize, // offset within the file where the record's header starts
+}
+
+struct KeyDir(HashMap<String, KeyDirEntry>);
+
+impl KeyDir {
+    fn load<W: io::Read + io::Seek>(w: W) -> Result<Self> {
+        let mut buf = vec![0; 1024];
+        let mut reader = io::BufReader::new(w);
+        let mut keydir = HashMap::new();
+
+        loop {
+            let offset = tell(&mut reader)? as usize;
+            if let Err(err) = reader.read_exact(&mut buf[..HEADER_SIZE]) {
+                if err.kind() == io::ErrorKind::UnexpectedEof {
+                    break;
+                }
+                return Err(Error::IoError(err));
+            }
+
+            let Header {
+                timestamp,
+                value_size,
+                key_size,
+            } = Header::decode(&buf[..HEADER_SIZE])?;
+            let key_size = key_size as usize;
+            let value_size = value_size as usize;
+
+            buf.resize(std::cmp::max(key_size, buf.len()), 0);
+            reader.read_exact(&mut buf[..key_size])?;
+            let key = std::str::from_utf8(&buf[..key_size])?.to_owned();
+
+            reader.seek(io::SeekFrom::Current(value_size as i64))?;
+
+            let entry = KeyDirEntry {
+                timestamp,
+                size: (HEADER_SIZE + key_size + value_size).try_into().unwrap(),
+                offset,
+            };
+
+            keydir.insert(key, entry);
+        }
+
+        Ok(KeyDir(keydir))
+    }
+}
+
+pub struct MyDB {
+    file: fs::File,
+    keydir: KeyDir,
+}
+
+impl MyDB {
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .append(true)
+            .create(true)
+            .open(path)?;
+        let keydir = KeyDir::load(&file)?;
+        Ok(MyDB { file, keydir })
+    }
+
+    pub fn new_from_file(file: fs::File) -> Result<Self> {
+        let keydir = KeyDir::load(&file)?;
+        Ok(MyDB { file, keydir })
+    }
+
+    pub fn get(&mut self, key: &str) -> Result<Option<String>> {
+        let entry = self.keydir.0.get(key);
+        let entry = match entry {
+            Some(entry) => entry,
+            None => return Ok(None),
+        };
+
+        self.file.seek(io::SeekFrom::Start(entry.offset as u64))?;
+
+        let mut kv = vec![0; entry.size as usize];
+        self.file.read_exact(&mut kv)?;
+        let kv = KeyValue::decode(&kv)?;
+
+        Ok(Some(kv.value))
+    }
+
+    pub fn set(&mut self, key: &str, value: &str) -> Result<()> {
+        let timestamp = now_timestamp();
+        let kv = KeyValue::new(timestamp, key.to_owned(), value.to_owned())?;
+        let kv = kv.encode();
+
+        self.file.write_all(&kv)?;
+        self.file.flush()?;
+        self.file.sync_all()?;
+
+        // TODO: instead of computing offset by seeking, we should maintain some state
+        // TODO: we should first update keydir before writing to file: we can undo keydir update in case
+        // file writing has an error.
+
+        let size = kv.len() as u64;
+        let offset = tell(&mut self.file)? - size;
+        let entry = KeyDirEntry {
+            timestamp,
+            size: size.try_into().unwrap(),
+            offset: offset.try_into().unwrap(),
+        };
+        self.keydir.0.insert(key.to_owned(), entry);
+
+        Ok(())
+    }
+}
+
+fn now_timestamp() -> u32 {
+    let time = time::SystemTime::now()
+        .duration_since(time::UNIX_EPOCH)
+        .unwrap();
+    time.as_secs().try_into().unwrap()
+}
+
+fn tell<F: io::Read + io::Seek>(f: &mut F) -> io::Result<u64> {
+    f.seek(io::SeekFrom::Current(0))
 }
 
 #[cfg(test)]
