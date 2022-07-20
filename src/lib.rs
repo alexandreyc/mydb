@@ -112,13 +112,9 @@ impl Encodable for KeyValue {
             ));
         }
 
-        let Header {
-            timestamp,
-            key_size,
-            value_size,
-        } = Header::decode(&buf[..HEADER_SIZE])?;
-        let key_size = key_size as usize;
-        let value_size = value_size as usize;
+        let header = Header::decode(&buf[..HEADER_SIZE])?;
+        let key_size = header.key_size as usize;
+        let value_size = header.value_size as usize;
         let total_size = HEADER_SIZE + key_size + value_size;
 
         if buf.len() != total_size {
@@ -139,7 +135,7 @@ impl Encodable for KeyValue {
         let value = std::str::from_utf8(value)?.to_owned();
 
         Ok(KeyValue {
-            timestamp,
+            timestamp: header.timestamp,
             key,
             value,
         })
