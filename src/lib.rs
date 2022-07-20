@@ -159,15 +159,16 @@ impl KeyDir {
         let mut buf = vec![0; 1024];
         let mut reader = io::BufReader::new(w);
         let mut keydir = HashMap::new();
+        let mut offset: usize = 0;
 
         loop {
-            let offset = tell(&mut reader)? as usize;
             if let Err(err) = reader.read_exact(&mut buf[..HEADER_SIZE]) {
                 if err.kind() == io::ErrorKind::UnexpectedEof {
                     break;
                 }
                 return Err(Error::IoError(err));
             }
+            offset += HEADER_SIZE;
 
             let Header {
                 timestamp,
@@ -179,9 +180,11 @@ impl KeyDir {
 
             buf.resize(std::cmp::max(key_size, buf.len()), 0);
             reader.read_exact(&mut buf[..key_size])?;
+            offset += key_size;
             let key = std::str::from_utf8(&buf[..key_size])?.to_owned();
 
             reader.seek(io::SeekFrom::Current(value_size as i64))?;
+            offset += value_size;
 
             let entry = KeyDirEntry {
                 timestamp,
@@ -251,9 +254,6 @@ impl MyDB {
         self.file.flush()?;
         self.file.sync_all()?;
 
-        // TODO: we should first update keydir before writing to file: we can undo keydir update in case
-        // file writing has an error.
-
         let size = kv.len() as u64;
         let entry = KeyDirEntry {
             timestamp,
@@ -272,10 +272,6 @@ fn now_timestamp() -> u32 {
         .duration_since(time::UNIX_EPOCH)
         .unwrap();
     time.as_secs().try_into().unwrap()
-}
-
-fn tell<F: io::Read + io::Seek>(f: &mut F) -> io::Result<u64> {
-    f.seek(io::SeekFrom::Current(0))
 }
 
 #[cfg(test)]
