@@ -1,3 +1,5 @@
+//! Simple embedded key/value database.
+
 use std::collections::HashMap;
 use std::fs;
 use std::io;
@@ -7,6 +9,7 @@ use std::io::Write;
 use std::path::Path;
 use std::time;
 
+/// Enum with all errors that might happen using this crate.
 #[derive(Debug)]
 pub enum Error {
     DecodeError(String),
@@ -27,6 +30,7 @@ impl From<io::Error> for Error {
     }
 }
 
+/// Custom result type that wraps [`Error`].
 pub type Result<T> = std::result::Result<T, Error>;
 
 trait Encodable: Sized {
@@ -194,6 +198,7 @@ impl KeyDir {
     }
 }
 
+/// Handle used to interact with the database.
 pub struct MyDB {
     file: fs::File,
     keydir: KeyDir,
@@ -201,6 +206,10 @@ pub struct MyDB {
 }
 
 impl MyDB {
+    /// Creates an instance of [`MyDB`] by using database file pointed to by `path`.
+    ///
+    /// If the file doesn't exist then it's created and a new empty database is returned. If the
+    /// file already exists then database is loaded from this file.
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
         let file = fs::OpenOptions::new()
             .read(true)
@@ -215,6 +224,7 @@ impl MyDB {
         })
     }
 
+    /// Creates an instance of [`MyDB`] by using the `file` handle.
     pub fn new_from_file(file: fs::File) -> Result<Self> {
         let keydir = KeyDir::load(&file)?;
         Ok(MyDB {
@@ -224,6 +234,11 @@ impl MyDB {
         })
     }
 
+    /// Gets the value associated with the given `key`.
+    ///
+    /// This operation might fail (mainly because of an I/O error) hence we return a [`Result`].
+    /// Besides, the given `key` might not exist within the database so the wrapped value is an
+    /// [`Option`].
     pub fn get(&mut self, key: &str) -> Result<Option<String>> {
         let entry = self.keydir.0.get(key);
         let entry = match entry {
@@ -240,6 +255,11 @@ impl MyDB {
         Ok(Some(kv.value))
     }
 
+    /// Sets the value associated with `key` to `value`.
+    ///
+    /// This operation might fail (mainly because of an I/O error) hence we return a [`Result`].
+    /// If the key already exists in the database it is overwritten with the new `value`. Otherwise,
+    /// the value is simply inserted.
     pub fn set(&mut self, key: &str, value: &str) -> Result<()> {
         let timestamp = now_timestamp();
         let kv = KeyValue::new(timestamp, key.to_owned(), value.to_owned())?;
