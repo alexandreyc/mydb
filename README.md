@@ -18,6 +18,7 @@ More specifically, it is a reimplemation in Rust of the didactic database [CaskD
 - No range queries
 - Memory usage might be high with a lot of keys
 - Startup time might be slow because we need to load all keys from disk to memory
+- Untested concurrency guarantees
 
 ## Usage
 
@@ -29,7 +30,7 @@ fn main() -> Result<()> {
     let mut db = MyDB::new(filename)?;
 
     db.set("hello", "world")?;
-    assert_eq!(db.get("hello")?, Some("world".to_string());
+    assert_eq!(db.get("hello")?, Some("world".to_string()));
 
     assert_eq!(db.get("nokey")?, None);
 
