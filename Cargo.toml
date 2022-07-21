@@ -9,3 +9,4 @@ edition = "2021"
 
 [dev-dependencies]
 rand = "0.8.5"
+tempfile = "3.3.0"
