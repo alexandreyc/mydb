@@ -40,7 +40,7 @@ trait Encodable: Sized {
 
 #[derive(Debug, PartialEq, Eq)]
 struct Header {
-    timestamp: u32,
+    timestamp: u32, // Useless but we keep it in order to stay file format compatible with CaskDB.
     key_size: u32,
     value_size: u32,
 }
