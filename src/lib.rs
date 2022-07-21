@@ -147,7 +147,6 @@ impl Encodable for KeyValue {
 }
 
 struct KeyDirEntry {
-    timestamp: u32,
     size: u32,     // total size of the record (in bytes)
     offset: usize, // offset within the file where the record's header starts
 }
@@ -185,7 +184,6 @@ impl KeyDir {
             reader.seek(io::SeekFrom::Current(value_size as i64))?;
 
             let entry = KeyDirEntry {
-                timestamp: header.timestamp,
                 size: total_size.try_into().unwrap(),
                 offset,
             };
@@ -271,7 +269,6 @@ impl MyDB {
 
         let size = kv.len() as u64;
         let entry = KeyDirEntry {
-            timestamp,
             size: size.try_into().unwrap(),
             offset: self.offset,
         };
