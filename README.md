@@ -16,9 +16,9 @@ More specifically, it is a reimplemation in Rust of the didactic database [CaskD
 - Keys and values are limited to UTF-8 encoded strings
 - No delete operation
 - No range queries
+- No concurrency controls
 - Memory usage might be high with a lot of keys
 - Startup time might be slow because we need to load all keys from disk to memory
-- Untested concurrency guarantees
 
 ## Usage
 
